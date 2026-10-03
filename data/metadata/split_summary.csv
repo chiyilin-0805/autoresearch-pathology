@@ -1,0 +1,6 @@
+dataset,organ,split,identity_type,units,images,verified_patient_level
+CRC-VAL-HE-7K,colon,test,official_cohort,1,7180,no
+LC25000,lung,test,source_tile,110,2264,no
+LC25000,lung,train,source_tile,518,10414,no
+LC25000,lung,val,source_tile,112,2322,no
+NCT-CRC-HE-100K,colon,train,official_cohort,1,100000,no
