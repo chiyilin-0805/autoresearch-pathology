@@ -21,3 +21,18 @@ dev/
 
 # Results file
 results.tsv
+
+# Protected pathology data: never commit source images or private identifiers.
+AI病理/
+data/raw/
+data/private/
+data/metadata/private/
+data/metadata/*private*.csv
+data/metadata/*identifiers*.csv
+data/metadata/*mapping*.csv
+runs/tissue_mask_preview/
+
+# Local secrets used for pseudonymization or data access.
+.env
+.env.*
+!.env.example
