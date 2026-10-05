@@ -248,6 +248,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=20261004)
     parser.add_argument("--eval-interval", type=float, default=60.0)
+    parser.add_argument(
+        "--init-checkpoint",
+        type=Path,
+        help="Optional compatible checkpoint used to initialize this single training run.",
+    )
+    parser.add_argument(
+        "--learning-rate",
+        type=float,
+        help="Optional learning-rate override, useful for checkpoint fine-tuning.",
+    )
     return parser.parse_args()
 
 
@@ -287,12 +297,20 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         localized_evidence=experiment.localized_evidence,
         backbone_name=experiment.backbone,
         classification_mode=experiment.classification_mode,
+        pretrained=args.init_checkpoint is None,
     ).to(device, memory_format=torch.channels_last)
+    if args.init_checkpoint is not None:
+        initial = torch.load(args.init_checkpoint.resolve(), map_location="cpu", weights_only=False)
+        model.load_state_dict(initial["model_state"], strict=True)
+    learning_rate = args.learning_rate or experiment.learning_rate
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=experiment.learning_rate, weight_decay=1e-4
+        model.parameters(), lr=learning_rate, weight_decay=1e-4
     )
     scaler = torch.amp.GradScaler("cuda")
-    positive_weight = torch.tensor([0.625], device=device)
+    train_rows = train_loader.dataset.rows
+    positives = sum(int(row["label"]) for row in train_rows)
+    negatives = len(train_rows) - positives
+    positive_weight = torch.tensor([negatives / max(1, positives)], device=device)
     train_iterator = iter(train_loader)
     pan_iterator = iter(pan_loader)
 
@@ -316,7 +334,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
     history: list[dict[str, Any]] = []
     steps = examples = 0
     loss_sum = 0.0
-    last_rate = experiment.learning_rate
+    last_rate = learning_rate
     torch.cuda.reset_peak_memory_stats(device)
 
     while True:
@@ -331,7 +349,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             train_iterator = iter(train_loader)
             continue
         progress = min(1.0, elapsed / args.seconds)
-        last_rate = set_learning_rate(optimizer, experiment.learning_rate, progress)
+        last_rate = set_learning_rate(optimizer, learning_rate, progress)
         images = batch["image"].to(device, non_blocking=True, memory_format=torch.channels_last)
         masks = batch["mask"].to(device, non_blocking=True)
         labels = batch["label"].to(device, non_blocking=True)
@@ -402,6 +420,12 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             metrics = compute_metrics(predictions)
             metrics["training_elapsed"] = elapsed
             history.append(metrics)
+            print(
+                f"val elapsed={elapsed:.1f}s auroc={metrics['auroc']:.4f} "
+                f"balanced_acc={metrics['balanced_accuracy']:.4f} "
+                f"soft_dice={metrics['soft_dice']:.4f} score={metrics['robust_score']:.4f}",
+                flush=True,
+            )
             if metrics["robust_score"] > best_score:
                 best_score = float(metrics["robust_score"])
                 best_metrics = metrics
@@ -414,6 +438,12 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         metrics = compute_metrics(predictions)
         metrics["training_elapsed"] = time.perf_counter() - started
         history.append(metrics)
+        print(
+            f"val elapsed={metrics['training_elapsed']:.1f}s auroc={metrics['auroc']:.4f} "
+            f"balanced_acc={metrics['balanced_accuracy']:.4f} "
+            f"soft_dice={metrics['soft_dice']:.4f} score={metrics['robust_score']:.4f}",
+            flush=True,
+        )
         if metrics["robust_score"] > best_score:
             best_score = float(metrics["robust_score"])
             best_metrics = metrics
@@ -432,6 +462,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "val_metrics": best_metrics,
         "thresholds_calibrated": False,
         "training_policy": "train weights; val model selection; historical_test untouched",
+        "initial_checkpoint": str(args.init_checkpoint.resolve()) if args.init_checkpoint else None,
     }
     torch.save(checkpoint, checkpoint_path)
     report = {

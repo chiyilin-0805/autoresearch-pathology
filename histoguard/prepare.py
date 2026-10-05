@@ -443,10 +443,14 @@ def compute_metrics(
     )
     for variant in ("clean", "same_patient_sham"):
         indices = np.asarray([record["variant"] == variant for record in records])
-        metrics[f"{variant}_fpr"] = float(predicted_labels[indices].mean())
+        metrics[f"{variant}_fpr"] = (
+            float(predicted_labels[indices].mean()) if indices.any() else 0.0
+        )
     for variant in POSITIVE_VARIANTS:
         indices = np.asarray([record["variant"] == variant for record in records])
-        metrics[f"{variant}_tpr"] = float(predicted_labels[indices].mean())
+        metrics[f"{variant}_tpr"] = (
+            float(predicted_labels[indices].mean()) if indices.any() else 0.0
+        )
     metrics["robust_score"] = (
         0.35 * metrics["auroc"]
         + 0.15 * metrics["balanced_accuracy"]
