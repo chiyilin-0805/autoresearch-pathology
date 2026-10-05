@@ -10,6 +10,7 @@ wheels/
 .venv
 worktrees/
 results/
+runs/
 queue/
 
 # Agent prompt files (generated per-session by launchers)
@@ -30,7 +31,7 @@ data/metadata/private/
 data/metadata/*private*.csv
 data/metadata/*identifiers*.csv
 data/metadata/*mapping*.csv
-runs/tissue_mask_preview/
+usb_pathology_copy.log
 
 # Local secrets used for pseudonymization or data access.
 .env
