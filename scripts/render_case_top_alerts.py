@@ -28,6 +28,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--count", type=int, default=30)
+    parser.add_argument(
+        "--order",
+        choices=("highest", "lowest-alerts"),
+        default="highest",
+        help="Rank all scores descending, or rank threshold-positive alerts ascending.",
+    )
     return parser.parse_args()
 
 
@@ -49,7 +55,17 @@ def load_model(path: Path, device: torch.device) -> tuple[HistoGuardNet, dict]:
 def main() -> int:
     args = parse_args()
     with args.predictions.open("r", encoding="utf-8-sig", newline="") as source:
-        rows = sorted(csv.DictReader(source), key=lambda row: float(row["score"]), reverse=True)[: args.count]
+        all_rows = list(csv.DictReader(source))
+    if args.order == "lowest-alerts":
+        rows = [
+            row
+            for row in all_rows
+            if float(row["score"]) >= float(row["classification_threshold"])
+        ]
+        rows.sort(key=lambda row: float(row["score"]))
+    else:
+        rows = sorted(all_rows, key=lambda row: float(row["score"]), reverse=True)
+    rows = rows[: args.count]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, checkpoint = load_model(args.checkpoint.resolve(), device)
     image_size = int(checkpoint["data_config"]["image_size"])
@@ -75,8 +91,9 @@ def main() -> int:
         overlay = (0.58 * np.asarray(original) + 0.42 * color).clip(0, 255).astype(np.uint8)
         header = 28
         row_image = Image.new("RGB", (original.width * 4, original.height + header), "white")
+        rank_label = "Low alert" if args.order == "lowest-alerts" else "High alert"
         captions = (
-            f"#{rank} Original p={float(row['score']):.4f}",
+            f"#{rank} {rank_label} original p={float(row['score']):.4f}",
             "Prediction box",
             "Heatmap",
             "Overlay",
